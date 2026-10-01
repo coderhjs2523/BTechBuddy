@@ -13,8 +13,14 @@ SENDER_EMAIL = os.getenv("SENDER_EMAIL")
 SENDER_PASSWORD = os.getenv("SENDER_PASSWORD")
 
 def send_otp_email(receiver_email: str, otp: str):
-    # Development fallback print
+    # Always print OTP to console/logs so you can test instantly even if SMTP fails
+    print(f"\n========================================")
     print(f"[OTP FOR {receiver_email}]: {otp}")
+    print(f"========================================\n")
+
+    if not SENDER_EMAIL or not SENDER_PASSWORD:
+        print("SMTP credentials not provided. Skipping email send.")
+        return
 
     try:
         message = MIMEMultipart("alternative")
@@ -34,9 +40,11 @@ def send_otp_email(receiver_email: str, otp: str):
         """
         message.attach(MIMEText(html, "html"))
 
-        with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
+        # Added timeout=3 seconds so it never hangs or stays 'Pending' on cloud servers
+        with smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=3) as server:
             server.starttls()
             server.login(SENDER_EMAIL, SENDER_PASSWORD)
             server.sendmail(SENDER_EMAIL, receiver_email, message.as_string())
+            print(f"OTP email successfully sent to {receiver_email}")
     except Exception as e:
-        print(f"SMTP Error: {e}")
+        print(f"SMTP Error (Non-blocking): {e}")
