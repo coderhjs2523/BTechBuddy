@@ -21,14 +21,11 @@ from models import User, Subject, VideoLecture, Note, Notice, Suggestion
 from auth import verify_password, hash_password, create_access_token, SECRET_KEY, ALGORITHM
 from email_utils import send_otp_email
 
-# Load environment variables strictly from .env file
 load_dotenv()
 ADMIN_EMAIL = os.getenv("ADMIN_EMAIL")
 
-# Single FastAPI app initialization
 app = FastAPI(title="BTechBuddy Backend", version="1.0.0")
 
-# 1. CORS Middleware (Frontend aur Backend ki connectivity ke liye)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  
@@ -37,13 +34,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 2. Render Backend URL for Keep-Alive Task (Using threading + requests instead of async httpx to avoid Python 3.14 issues)
-RENDER_URL = "https://btechbuddy-backend.onrender.com"
+RENDER_URL = "https://btechbuddy-production.up.railway.app"
 
 def keep_alive():
-    """Har 10 minute mein khud ke server ko ping karega taaki Render so na jaye"""
     while True:
-        time.sleep(600)  # 10 minutes wait
+        time.sleep(600)
         try:
             response = requests.get(RENDER_URL)
             print(f"Keep-alive ping sent: {response.status_code}")
@@ -52,13 +47,8 @@ def keep_alive():
 
 @app.on_event("startup")
 async def startup_event():
-    # Background thread for keep-alive
     threading.Thread(target=keep_alive, daemon=True).start()
-    
-    # Create database tables
     Base.metadata.create_all(bind=engine)
-    
-    # Safe Migration Fix for missing columns in older DB files
     try:
         with engine.connect() as connection:
             connection.execute(text("ALTER TABLE users ADD COLUMN reset_otp VARCHAR"))
@@ -66,7 +56,6 @@ async def startup_event():
     except Exception:
         pass
 
-# Setup Uploads Directory
 UPLOAD_DIR = Path("uploads")
 UPLOAD_DIR.mkdir(exist_ok=True)
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
@@ -89,7 +78,6 @@ def get_current_active_user(token: str = Depends(oauth2_scheme), db: Session = D
     if not user: raise HTTPException(status_code=401)
     return user
 
-# --- HEALTH CHECK ---
 @app.get("/")
 def read_root():
     return {"message": "BTechBuddy Backend is awake and running smoothly!"}
@@ -98,7 +86,6 @@ def read_root():
 def health_check():
     return {"status": "healthy"}
 
-# --- AUTH & PASSWORD RESET ---
 @app.post("/auth/signup")
 def signup(email: str = Form(...), password: str = Form(...), db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == email).first()
@@ -150,7 +137,6 @@ def reset_password(email: str = Form(...), otp: str = Form(...), new_password: s
     db.commit()
     return {"message": "Password reset successfully!"}
 
-# --- ADMIN USER MANAGEMENT ---
 @app.get("/admin/users")
 def get_all_users(db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
     if not current_user.is_admin: raise HTTPException(status_code=403)
@@ -166,13 +152,11 @@ def delete_user(user_id: int, db: Session = Depends(get_db), current_user: User 
         db.commit()
     return {"message": "User deleted"}
 
-# --- STATS ---
 @app.get("/admin/stats")
 def get_stats(db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
     if not current_user.is_admin: raise HTTPException(status_code=403)
     return {"total_users": db.query(User).count(), "total_subjects": db.query(Subject).count(), "total_videos": db.query(VideoLecture).count(), "total_notes": db.query(Note).count()}
 
-# --- SUBJECTS ---
 @app.get("/subjects/")
 def get_subjects(db: Session = Depends(get_db)):
     return db.query(Subject).all()
@@ -197,7 +181,6 @@ def delete_subject(id: int, db: Session = Depends(get_db), current_user: User = 
     if sub: db.delete(sub); db.commit()
     return {"message": "Deleted"}
 
-# --- VIDEOS & NOTES ---
 @app.get("/subjects/{id}/videos")
 def get_videos(id: int, db: Session = Depends(get_db)):
     return db.query(VideoLecture).filter(VideoLecture.subject_id == id).all()
@@ -225,7 +208,7 @@ def add_note(id: int, title: str = Form(...), file: UploadFile = File(...), db: 
     if not current_user.is_admin: raise HTTPException(status_code=403)
     path = UPLOAD_DIR / file.filename
     with open(path, "wb") as buffer: shutil.copyfileobj(file.file, buffer)
-    db.add(Note(subject_id=id, title=title, file_path=f"http://localhost:8000/uploads/{file.filename}"))
+    db.add(Note(subject_id=id, title=title, file_path=f"{RENDER_URL}/uploads/{file.filename}"))
     db.commit()
     return {"message": "Note uploaded"}
 
@@ -236,7 +219,6 @@ def delete_note(id: int, db: Session = Depends(get_db), current_user: User = Dep
     if note: db.delete(note); db.commit()
     return {"message": "Deleted"}
 
-# --- NOTICES ---
 @app.get("/notices/")
 def get_notices(db: Session = Depends(get_db)):
     return db.query(Notice).order_by(Notice.created_at.desc()).all()
@@ -255,7 +237,6 @@ def delete_notice(id: int, db: Session = Depends(get_db), current_user: User = D
     if n: db.delete(n); db.commit()
     return {"message": "Deleted"}
 
-# --- SUGGESTIONS / FEEDBACK ---
 @app.get("/suggestions/")
 def get_suggestions(db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
     if not current_user.is_admin: raise HTTPException(status_code=403)
