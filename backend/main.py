@@ -12,6 +12,8 @@ from pydantic import BaseModel
 import shutil
 from pathlib import Path
 from sqlalchemy import text
+import asyncio
+import httpx
 
 from database import engine, SessionLocal, Base
 from models import User, Subject, VideoLecture, Note, Notice, Suggestion
@@ -22,30 +24,56 @@ from email_utils import send_otp_email
 load_dotenv()
 ADMIN_EMAIL = os.getenv("ADMIN_EMAIL")
 
-Base.metadata.create_all(bind=engine)
+# Single FastAPI app initialization
+app = FastAPI(title="BTechBuddy Backend", version="1.0.0")
 
-# Safe Migration Fix for missing columns in older DB files
-try:
-    with engine.connect() as connection:
-        connection.execute(text("ALTER TABLE users ADD COLUMN reset_otp VARCHAR"))
-        connection.commit()
-except Exception:
-    pass
-
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
-app = FastAPI(title="BTechBuddy API")
-
+# 1. CORS Middleware (Frontend aur Backend ki connectivity ke liye)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# 2. Render Backend URL for Keep-Alive Task (Prevents Render from sleeping)
+RENDER_URL = "https://btechbuddy-backend.onrender.com"
+
+async def keep_alive():
+    """Har 10 minute mein khud ke server ko ping karega taaki Render so na jaye"""
+    async with httpx.AsyncClient() as client:
+        while True:
+            try:
+                response = await client.get(RENDER_URL)
+                print(f"Keep-alive ping sent: {response.status_code}")
+            except Exception as e:
+                print(f"Keep-alive ping failed: {e}")
+            
+            # 10 minutes (600 seconds) ka gap
+            await asyncio.sleep(600)
+
+@app.on_event("startup")
+async def startup_event():
+    # Jaise hi app start hoga, keep-alive background mein chal padega
+    asyncio.create_task(keep_alive())
+    
+    # Create database tables
+    Base.metadata.create_all(bind=engine)
+    
+    # Safe Migration Fix for missing columns in older DB files
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("ALTER TABLE users ADD COLUMN reset_otp VARCHAR"))
+            connection.commit()
+    except Exception:
+        pass
+
+# Setup Uploads Directory
 UPLOAD_DIR = Path("uploads")
 UPLOAD_DIR.mkdir(exist_ok=True)
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
 
 def get_db():
     db = SessionLocal()
@@ -63,6 +91,15 @@ def get_current_active_user(token: str = Depends(oauth2_scheme), db: Session = D
     if not user: raise HTTPException(status_code=401)
     return user
 
+# --- HEALTH CHECK ---
+@app.get("/")
+def read_root():
+    return {"message": "BTechBuddy Backend is awake and running smoothly!"}
+
+@app.get("/health")
+def health_check():
+    return {"status": "healthy"}
+
 # --- AUTH & PASSWORD RESET ---
 @app.post("/auth/signup")
 def signup(email: str = Form(...), password: str = Form(...), db: Session = Depends(get_db)):
@@ -73,7 +110,6 @@ def signup(email: str = Form(...), password: str = Form(...), db: Session = Depe
         user.hashed_password = hash_password(password)
         user.otp = otp_code
     else:
-        # Strictly checks against the .env file variable
         is_admin_user = True if (ADMIN_EMAIL and email == ADMIN_EMAIL) else False
         new_user = User(email=email, hashed_password=hash_password(password), is_verified=False, otp=otp_code, is_admin=is_admin_user)
         db.add(new_user)
