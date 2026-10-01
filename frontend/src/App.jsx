@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 
-const API_BASE_URL = "btechbuddy-production.up.railway.app";;
+const API_BASE_URL = "https://btechbuddy-production.up.railway.app";
 
 export default function App() {
   const [step, setStep] = useState('login'); 
