@@ -12,8 +12,9 @@ from pydantic import BaseModel
 import shutil
 from pathlib import Path
 from sqlalchemy import text
-import asyncio
-import httpx
+import threading
+import time
+import requests
 
 from database import engine, SessionLocal, Base
 from models import User, Subject, VideoLecture, Note, Notice, Suggestion
@@ -36,26 +37,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 2. Render Backend URL for Keep-Alive Task (Prevents Render from sleeping)
+# 2. Render Backend URL for Keep-Alive Task (Using threading + requests instead of async httpx to avoid Python 3.14 issues)
 RENDER_URL = "https://btechbuddy-backend.onrender.com"
 
-async def keep_alive():
+def keep_alive():
     """Har 10 minute mein khud ke server ko ping karega taaki Render so na jaye"""
-    async with httpx.AsyncClient() as client:
-        while True:
-            try:
-                response = await client.get(RENDER_URL)
-                print(f"Keep-alive ping sent: {response.status_code}")
-            except Exception as e:
-                print(f"Keep-alive ping failed: {e}")
-            
-            # 10 minutes (600 seconds) ka gap
-            await asyncio.sleep(600)
+    while True:
+        time.sleep(600)  # 10 minutes wait
+        try:
+            response = requests.get(RENDER_URL)
+            print(f"Keep-alive ping sent: {response.status_code}")
+        except Exception as e:
+            print(f"Keep-alive ping failed: {e}")
 
 @app.on_event("startup")
 async def startup_event():
-    # Jaise hi app start hoga, keep-alive background mein chal padega
-    asyncio.create_task(keep_alive())
+    # Background thread for keep-alive
+    threading.Thread(target=keep_alive, daemon=True).start()
     
     # Create database tables
     Base.metadata.create_all(bind=engine)
