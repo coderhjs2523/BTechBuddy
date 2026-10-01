@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 
-const API_BASE_URL = "http://localhost:8000";
+const API_BASE_URL = "https://btechbuddy-backend.onrender.com";;
 
 export default function App() {
   const [step, setStep] = useState('login'); 
